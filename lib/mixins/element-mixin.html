@@ -13,6 +13,7 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
 <link rel="import" href="../utils/mixin.html">
 <link rel="import" href="../utils/style-gather.html">
 <link rel="import" href="../utils/resolve-url.html">
+<link rel="import" href="../utils/html.html">
 <link rel="import" href="../elements/dom-module.html">
 <link rel="import" href="property-effects.html">
 <link rel="import" href="properties-mixin.html">
@@ -255,6 +256,9 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
         let template = /** @type {PolymerElementConstructor} */ (this).template;
         if (template) {
           if (typeof template === 'string') {
+            console.warn(`String templates are deprecated and will be ` +
+              `removed in the next major release. ` +
+              `Please use \`Polymer.html\` instead.`);
             let t = document.createElement('template');
             t.innerHTML = template;
             template = t;

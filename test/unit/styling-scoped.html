@@ -621,7 +621,7 @@ HTMLImports.whenReady(function() {
 
     customElements.define('x-template-string', class extends Polymer.Element {
       static get template() {
-        return `<style>
+        return Polymer.html`<style>
           :host {
             display: block;
             border: 1px solid orange;

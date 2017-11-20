@@ -97,7 +97,6 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
     </script>
   </dom-module>
 
-
   <dom-module id="sub-element">
     <script>
     HTMLImports.whenReady(function() {
@@ -255,7 +254,7 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
 
     class SubNewTemplate extends window.MyElement {
       static get template() {
-        return `
+        return Polymer.html`
           <h1>Sub template</h1>
           <div id="subContent">{{prop2}}</div>`;
       }
@@ -340,6 +339,17 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
   </test-fixture>
 
   <script>
+  HTMLImports.whenReady(function() {
+    class StringTemplate extends Polymer.Element {
+      static get template() {
+        return `<div>foo</div>`;
+      }
+    }
+    customElements.define('string-template', StringTemplate)
+  });
+  </script>
+
+  <script>
   suite('class extends Polymer.Element', function() {
 
     var el;
@@ -419,6 +429,15 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
       fixtureEl._propertyToAttribute('prop');
       assert.equal(fixtureEl.getAttribute('prop'), 'propValue');
     });
+
+    test('string template produces deprecation warning', function() {
+      sinon.spy(console, 'warn');
+      const el = document.createElement('string-template');
+      document.body.appendChild(el);
+      assert.isTrue(console.warn.calledWithMatch('deprecated'));
+      document.body.removeChild(el);
+      console.warn.restore();
+    })
 
   });
 
