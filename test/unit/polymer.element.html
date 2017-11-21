@@ -345,7 +345,7 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
         return `<div>foo</div>`;
       }
     }
-    customElements.define('string-template', StringTemplate)
+    customElements.define('string-template', StringTemplate);
   });
   </script>
 
@@ -437,7 +437,7 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
       assert.isTrue(console.warn.calledWithMatch('deprecated'));
       document.body.removeChild(el);
       console.warn.restore();
-    })
+    });
 
   });
 
