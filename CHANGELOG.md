@@ -1,5 +1,53 @@
 # Change Log
 
+## [v2.2.0](https://github.com/Polymer/polymer/tree/v2.2.0) (2017-10-18)
+- [ci skip] Autoupdate version when releasing ([commit](https://github.com/Polymer/polymer/commit/d893d6ae))
+
+- add edge 15, use chrome stable ([commit](https://github.com/Polymer/polymer/commit/c6f2d817))
+
+- super it and put back takeRecords ([commit](https://github.com/Polymer/polymer/commit/02e2f148))
+
+- more feedback ([commit](https://github.com/Polymer/polymer/commit/15cbdff5))
+
+- Address feedback ([commit](https://github.com/Polymer/polymer/commit/e71b84a8))
+
+- add some description of the dir mixin ([commit](https://github.com/Polymer/polymer/commit/f98ad117))
+
+- Fix linting ([commit](https://github.com/Polymer/polymer/commit/624189a3))
+
+- Always do the :dir transform ([commit](https://github.com/Polymer/polymer/commit/31c0ebc7))
+
+- Clean up closure externs ([commit](https://github.com/Polymer/polymer/commit/1e5ea942))
+
+- remove bogus semicolon ([commit](https://github.com/Polymer/polymer/commit/7d044b49))
+
+- Declare Polymer.Templatizer directly, for Closure. (#4870) ([commit](https://github.com/Polymer/polymer/commit/3b155173))
+
+- First draft of a `:dir` aware element mixin ([commit](https://github.com/Polymer/polymer/commit/2ef65aa6))
+
+- [ci-skip] Update CHANGELOG ([commit](https://github.com/Polymer/polymer/commit/28e60271))
+
+## [v2.1.1](https://github.com/Polymer/polymer/tree/v2.1.1) (2017-09-28)
+- Prepare for release 2.1.1 ([commit](https://github.com/Polymer/polymer/commit/f049dd91))
+
+- Move @externs before @license because Closure likes that. ([commit](https://github.com/Polymer/polymer/commit/c3f31455))
+
+- just move the style instead ([commit](https://github.com/Polymer/polymer/commit/61b2c8a5))
+
+- Copy <custom-style> styles to main document ([commit](https://github.com/Polymer/polymer/commit/155ab8a2))
+
+- Fix typos and jsdoc (#4846) ([commit](https://github.com/Polymer/polymer/commit/b19e180a))
+
+- [ci skip] update changelog ([commit](https://github.com/Polymer/polymer/commit/44fd1eaa))
+
+- Fix shady dom style querySelector ([commit](https://github.com/Polymer/polymer/commit/d5b6bad3))
+
+- Fix linter error ([commit](https://github.com/Polymer/polymer/commit/2da30c33))
+
+- Exclude script and style tags for parsing bindings ([commit](https://github.com/Polymer/polymer/commit/41fa90b3))
+
+- Special-case undefined textarea.value same as input. Fixes #4630 ([commit](https://github.com/Polymer/polymer/commit/8aa201b9))
+
 ## [v2.1.0](https://github.com/Polymer/polymer/tree/v2.1.0) (2017-09-19)
 - [ci skip] bump version to 2.1.0 ([commit](https://github.com/Polymer/polymer/commit/64788aad))
 
