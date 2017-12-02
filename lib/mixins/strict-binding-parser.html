@@ -15,97 +15,501 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
 (function() {
   'use strict';
 
-  /**
-   * The open and corresponding closing brackets for surrounding bindings.
-   * @enum {string}
-   */
-  const BINDINGS = {
-    '{': '}',
-    '[': ']'
+  const KEYWORDS = ['this', 'true', 'false'];
+  const PRECEDENCE = {
+      ')': 0,
+      ']': 0,
+      '}': 0,
+      '(': 11,
+      '[': 11,
+      '{': 11,
+  };
+  const POSTFIX_PRECEDENCE = 11;
+
+  const UNARY_OPERATORS = ['-', '!'];
+
+  const _UNARY_OPERATORS = {
+    '-': (a) => -a,
+    '!': (a) => !a,
   };
 
-  /**
-   * All states that the parser can be in. The states represent the state-machine as a whole.
-   * @enum {number}
-   */
-  const STATE = {
-    INITIAL: 1,
-    FIRSTOPENINGBINDING: 2,
-    FIRSTCHARACTERBINDING: 3,
-    BINDING: 4,
-    FIRSTCOLON: 5,
-    COLONNOTIFYEVENT: 6,
-    COLONNOTIFYEVENTFIRSTCLOSINGBINDING: 7,
-    FIRSTCLOSINGBINDING: 8,
-    STRING: 9,
-    METHOD: 10,
-    STRINGARG: 11,
-    NUMBERARG: 12,
-    VARIABLEARG: 13,
-    METHODCLOSED: 14,
-    METHODCLOSEDBINDING: 15
-  };
-
-  function pushLiteral(text, i, parts, startChar) {
-    const literal = text.substring(startChar || 0, i);
-    if (literal) {
-      parts.push({
-        literal
-      });
-    }
+  const Kind = {};
+      Kind[Kind["STRING"] = 1] = "STRING";
+      Kind[Kind["IDENTIFIER"] = 2] = "IDENTIFIER";
+      Kind[Kind["DOT"] = 3] = "DOT";
+      Kind[Kind["COMMA"] = 4] = "COMMA";
+      Kind[Kind["INTEGER"] = 6] = "INTEGER";
+      Kind[Kind["DECIMAL"] = 7] = "DECIMAL";
+      Kind[Kind["GROUPER"] = 9] = "GROUPER";
+      Kind[Kind["KEYWORD"] = 10] = "KEYWORD";
+  function token(kind, value, precedence) {
+      return {
+          kind: kind,
+          value: value,
+          precedence: precedence || 0,
+      };
   }
-
-  function storeMethod(bindingData, templateInfo) {
-    const methodName = bindingData.signature.methodName;
-    const dynamicFns = templateInfo.dynamicFns;
-    if (dynamicFns && dynamicFns[methodName] || bindingData.signature.static) {
-      bindingData.dependencies.push(methodName);
-      bindingData.signature.dynamicFn = true;
-    }
+  function _isWhitespace(ch) {
+      return ch === 9 /* \t */ ||
+          ch === 10 /* \n */ ||
+          ch === 13 /* \r */ ||
+          ch === 32 /* space */;
   }
-
-  function storeVariableBinding(parts, bindingData, prop, i) {
-    bindingData.source = prop;
-    bindingData.dependencies.push(prop);
-    bindingData.startChar = i + 1;
-    parts.push(bindingData);
+  // TODO(justinfagnani): allow code points > 127
+  function _isIdentOrKeywordStart(ch) {
+      return _isIdentifier(ch) || ch === 95 /* _ */ || ch === 36 /* $ */;
   }
-
-  function storeMethodVariable(bindingData, text, i) {
-    const name = text.substring(bindingData.startChar, i).trim();
-    if (name) {
-      if (name === 'true' || name === 'false') {
-        bindingData.signature.args.push({
-          name,
-          value: name == 'true',
-          literal: true
-        });
-      } else {
-        const arg = {
-          name
-        };
-        arg.structured = Polymer.Path.isPath(name);
-        if (arg.structured) {
-          arg.wildcard = (name.slice(-2) == '.*');
-          if (arg.wildcard) {
-            arg.name = name.slice(0, -2);
+  // TODO(justinfagnani): allow code points > 127
+  function _isIdentifier(ch) {
+      ch &= ~32;
+      return 65 /* A */ <= ch && ch <= 90 /* Z */ || ch === 26 /* : */ || ch === 10 /* * */ || ch === 45 /* - */;
+  }
+  function _isKeyword(str) {
+      return KEYWORDS.indexOf(str) !== -1;
+  }
+  function _isQuote(ch) {
+      return ch === 34 /* " */ || ch === 39 /* ' */;
+  }
+  function _isNumber(ch) {
+      return 48 /* 0 */ <= ch && ch <= 57 /* 9 */ || ch === 45 /* - */;
+  }
+  function _isOperator(ch) {
+    return ch === 45 /* - */ ||
+        ch === 42 /* * */ ||
+        ch === 33 /* ! */;
+}
+  function _isGrouper(ch) {
+      return ch === 40 /* ( */ ||
+          ch === 41 /* ) */ ||
+          ch === 91 /* [ */ ||
+          ch === 93 /* ] */ ||
+          ch === 123 /* { */ ||
+          ch === 125 /* } */;
+  }
+  function _escapeString(str) {
+      return str.replace(/\\(.)/g, function (_match, group) {
+          switch (group) {
+              case 'n':
+                  return '\n';
+              case 'r':
+                  return '\r';
+              case 't':
+                  return '\t';
+              case 'b':
+                  return '\b';
+              case 'f':
+                  return '\f';
+              default:
+                  return group;
           }
-        }
-        bindingData.signature.args.push(arg);
-        bindingData.dependencies.push(name);
-        bindingData.signature.static = false;
+      });
+  }
+  class Tokenizer {
+      constructor(input) {
+          this._index = -1;
+          this._tokenStart = 0;
+          this._next = null;
+          this._input = input;
       }
-    }
+      nextToken() {
+          if (this._index === -1)
+              this._advance();
+          while (_isWhitespace(this._next)) {
+              this._advance(true);
+          }
+          if (_isQuote(this._next))
+              return this._tokenizeString();
+          if (_isIdentOrKeywordStart(this._next)) {
+            return this._tokenizeIdentOrKeyword();
+          }
+          if (_isNumber(this._next))
+              return this._tokenizeNumber();
+          if (this._next === 46 /* . */)
+              return this._tokenizeDot();
+          if (this._next === 44 /* , */)
+              return this._tokenizeComma();
+          if (_isOperator(this._next))
+            return this._tokenizeOperator();
+          if (_isGrouper(this._next))
+              return this._tokenizeGrouper();
+          // no match, should be end of input
+          this._advance();
+          if (this._next) {
+              throw new Error(`Expected end of input, got ${this._next}`);
+          }
+          return null;
+      }
+      _advance(resetTokenStart) {
+          if (this._index < this._input.length) {
+              this._index++;
+              this._next = this._input.charCodeAt(this._index);
+              if (resetTokenStart) {
+                  this._tokenStart = this._index;
+              }
+          }
+          else {
+              this._next = null;
+          }
+      }
+      _getValue(lookahead) {
+          const v = this._input.substring(this._tokenStart, this._index + (lookahead || 0));
+          if (!lookahead)
+              this._clearValue();
+          return v;
+      }
+      _clearValue() {
+          this._tokenStart = this._index;
+      }
+      _tokenizeString() {
+          const _us = 'unterminated string';
+          const quoteChar = this._next;
+          this._advance(true);
+          while (this._next !== quoteChar) {
+              if (!this._next)
+                  throw new Error(_us);
+              if (this._next === 92 /* \ */) {
+                  this._advance();
+                  if (!this._next)
+                      throw new Error(_us);
+              }
+              this._advance();
+          }
+          const t = token(Kind.STRING, _escapeString(this._getValue()));
+          this._advance();
+          return t;
+      }
+      _tokenizeIdentOrKeyword() {
+          while (_isIdentifier(this._next)) {
+              this._advance();
+          }
+          const value = this._getValue();
+          const kind = _isKeyword(value) ? Kind.KEYWORD : Kind.IDENTIFIER;
+          return token(kind, value);
+      }
+      _tokenizeNumber() {
+          while (_isNumber(this._next)) {
+              this._advance();
+          }
+          if (this._next === 46 /* . */)
+              return this._tokenizeDot();
+          return token(Kind.INTEGER, this._getValue());
+      }
+      _tokenizeDot() {
+          this._advance();
+          if (_isNumber(this._next))
+              return this._tokenizeFraction();
+          this._clearValue();
+          return token(Kind.DOT, '.', POSTFIX_PRECEDENCE);
+      }
+      _tokenizeComma() {
+          this._advance(true);
+          return token(Kind.COMMA, ',');
+      }
+      _tokenizeOperator() {
+        this._advance();
+        const op = this._getValue();
+        return token(Kind.OPERATOR, op, constants_1.PRECEDENCE[op]);
+      }
+      _tokenizeGrouper() {
+          const value = String.fromCharCode(this._next);
+          const t = token(Kind.GROUPER, value, PRECEDENCE[value]);
+          this._advance(true);
+          return t;
+      }
   }
 
-  function storeMethodNumber(bindingData, text, i) {
-    const value = text.substring(bindingData.startChar, i).trim();
-    bindingData.signature.args.push({
-      name: value,
-      value: Number(value),
-      literal: true
-    });
-  }
+  class EvalAstFactory {
+    empty() {
+        // TODO(justinfagnani): return null instead?
+        return {
+            type: 'Empty',
+            evaluate(scope) {
+                return scope;
+            },
+            getIds(idents) {
+                return idents;
+            },
+        };
+    }
+    // TODO(justinfagnani): just use a JS literal?
+    literal(v) {
+        return {
+            type: 'Literal',
+            value: v,
+            evaluate(_scope) {
+                return this.value;
+            },
+            getIds(idents) {
+                return idents;
+            },
+        };
+    }
+    id(v) {
+        return {
+            type: 'ID',
+            value: v,
+            evaluate(scope) {
+                // TODO(justinfagnani): this prevernts access to properties named 'this'
+                if (this.value === 'this') {
+                  return scope;
+                }
+                if (this.value === 'true') {
+                  return true;
+                }
+                if (this.value === 'false') {
+                  return false;
+                }
+                return scope[this.value];
+            },
+            getIds(idents) {
+                idents.push(this.value);
+                return idents;
+            },
+        };
+    }
+    unary(op, expr) {
+        const f = UNARY_OPERATORS[op];
+        return {
+            type: 'Unary',
+            operator: op,
+            child: expr,
+            evaluate(scope) {
+                return f(this.child.evaluate(scope));
+            },
+            getIds(idents) {
+                return this.child.getIds(idents);
+            },
+        };
+    }
+    getter(g, n) {
+        return {
+            type: 'Getter',
+            receiver: g,
+            name: n,
+            evaluate(scope) {
+                return this.receiver.evaluate(scope)[this.name];
+            },
+            getIds(idents) {
+                this.receiver.getIds(idents);
+                return idents;
+            },
+        };
+    }
+    invoke(receiver, method, args) {
+        if (method != null && typeof method !== 'string') {
+            throw new Error('method not a string');
+        }
+        return {
+            type: 'Invoke',
+            receiver: receiver,
+            method: method,
+            arguments: args,
+            evaluate(scope) {
+                const receiver = this.receiver.evaluate(scope);
+                // TODO(justinfagnani): this might be wrong in cases where we're
+                // invoking a top-level function rather than a method. If method is
+                // defined on a nested scope, then we should probably set _this to null.
+                const _this = this.method ? receiver : scope['this'] || scope;
+                const f = this.method ? receiver[method] : receiver;
+                const args = this.arguments || [];
+                const argValues = args.map((a) => (a && a.evaluate(scope)));
+                return f.apply(_this, argValues);
+            },
+            getIds(idents) {
+                this.receiver.getIds(idents);
+                (this.arguments || []).forEach((a) => (a && a.getIds(idents)));
+                return idents;
+            },
+        };
+    }
+}
+
+function parse(expr, astFactory) {
+    return new Parser(expr, astFactory).parse();
+}
+class Parser {
+    constructor(input, astFactory) {
+        this._kind = null;
+        this._token = null;
+        this._value = null;
+        this._tokenizer = new Tokenizer(input);
+        this._ast = astFactory;
+    }
+    parse() {
+        this._advance();
+        return this._parseExpression();
+    }
+    _advance(kind, value) {
+        if (!this._matches(kind, value)) {
+            throw new Error(`Expected kind ${kind} (${value}), was ${this._token}`);
+        }
+        const t = this._tokenizer.nextToken();
+        this._token = t;
+        this._kind = t && t.kind;
+        this._value = t && t.value;
+    }
+    _matches(kind, value) {
+        return !(kind && (this._kind !== kind) || value && (this._value !== value));
+    }
+    _parseExpression() {
+        if (!this._token)
+            return this._ast.empty();
+        return this._parsePrecedence(this._parsePrimary(), 0);
+    }
+    // _parsePrecedence and _parseBinary implement the precedence climbing
+    // algorithm as described in:
+    // http://en.wikipedia.org/wiki/Operator-precedence_parser#Precedence_climbing_method
+    _parsePrecedence(left, precedence) {
+        if (!left) {
+            throw new Error('Expected left not to be null.');
+        }
+        while (this._token) {
+            if (this._matches(Kind.GROUPER, '(')) {
+                const args = this._parseArguments();
+                left = this._ast.invoke(left, null, args);
+            }
+            else if (this._matches(Kind.GROUPER, '[')) {
+                const indexExpr = this._parseIndex();
+                left = this._ast.index(left, indexExpr);
+            }
+            else if (this._matches(Kind.DOT)) {
+                this._advance();
+                const right = this._parsePrimary();
+                left = this._makeInvokeOrGetter(left, right);
+            }
+            else if (this._matches(Kind.DOT)) {
+                this._advance();
+                const right = this._parsePrimary();
+                left = this._makeInvokeOrGetter(left, right);
+            }
+            else if (this._matches(Kind.KEYWORD)) {
+                break;
+            }
+            else {
+                break;
+            }
+        }
+        return left;
+    }
+    _makeInvokeOrGetter(left, right) {
+        if (right.type === 'ID') {
+            return this._ast.getter(left, right.value);
+        }
+        else if (right.type === 'Invoke' && right.receiver.type === 'ID') {
+            const method = right.receiver;
+            return this._ast.invoke(left, method.value, right.arguments);
+        }
+        else {
+            throw new Error(`expected identifier: ${right}`);
+        }
+    }
+    _parsePrimary() {
+        switch (this._kind) {
+            case Kind.KEYWORD:
+                const keyword = this._value;
+                if (keyword === 'this') {
+                    this._advance();
+                    // TODO(justin): return keyword node
+                    return this._ast.id(keyword);
+                }
+                else if (KEYWORDS.indexOf(keyword) !== -1) {
+                    throw new Error(`unexpected keyword: ${keyword}`);
+                }
+                throw new Error(`unrecognized keyword: ${keyword}`);
+            case Kind.IDENTIFIER:
+                return this._parseInvokeOrIdentifier();
+            case Kind.STRING:
+                return this._parseString();
+            case Kind.INTEGER:
+                return this._parseInteger();
+            case Kind.DECIMAL:
+                return this._parseDecimal();
+            case Kind.GROUPER:
+                if (this._value === '(') {
+                    return this._parseParen();
+                }
+                return null;
+            case Kind.COLON:
+                throw new Error('unexpected token ":"');
+            default:
+                return null;
+        }
+    }
+    _parseInvokeOrIdentifier() {
+        const value = this._value;
+        if (value === 'true') {
+            this._advance();
+            return this._ast.literal(true);
+        }
+        if (value === 'false') {
+            this._advance();
+            return this._ast.literal(false);
+        }
+        if (value === 'null') {
+            this._advance();
+            return this._ast.literal(null);
+        }
+        const identifier = this._parseIdentifier();
+        const args = this._parseArguments();
+        return (!args) ? identifier : this._ast.invoke(identifier, null, args);
+    }
+    _parseIdentifier() {
+        if (!this._matches(Kind.IDENTIFIER)) {
+            throw new Error(`expected identifier: ${this._value}`);
+        }
+        const value = this._value;
+        this._advance();
+        return this._ast.id(value);
+    }
+    _parseArguments() {
+        if (this._matches(Kind.GROUPER, '(')) {
+            const args = [];
+            do {
+                this._advance();
+                if (this._matches(Kind.GROUPER, ')')) {
+                    break;
+                }
+                const expr = this._parseExpression();
+                args.push(expr);
+            } while (this._matches(Kind.COMMA));
+            this._advance(Kind.GROUPER, ')');
+            return args;
+        }
+        return null;
+    }
+    _parseIndex() {
+        if (this._matches(Kind.GROUPER, '[')) {
+            this._advance();
+            const expr = this._parseExpression();
+            this._advance(Kind.GROUPER, ']');
+            return expr;
+        }
+        return null;
+    }
+    _parseParen() {
+        this._advance();
+        const expr = this._parseExpression();
+        this._advance(Kind.GROUPER, ')');
+        return this._ast.paren(expr);
+    }
+    _parseString() {
+        const value = this._ast.literal(this._value);
+        this._advance();
+        return value;
+    }
+    _parseInteger(prefix) {
+        prefix = prefix || '';
+        const value = this._ast.literal(parseInt(`${prefix}${this._value}`, 10));
+        this._advance();
+        return value;
+    }
+    _parseDecimal(prefix) {
+        prefix = prefix || '';
+        const value = this._ast.literal(parseFloat(`${prefix}${this._value}`));
+        this._advance();
+        return value;
+    }
+}
 
   /**
    * Mixin that parses binding expressions and generates corresponding metadata.
@@ -118,6 +522,8 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
    * @summary Mixin that parses binding expressions and generates corresponding metadata.
    */
   const StrictBindingParser = Polymer.dedupingMixin((base) => {
+
+    const astFactory = new EvalAstFactory();
 
     return class extends base {
 
@@ -155,246 +561,36 @@ subject to an additional IP rights grant found at http://polymer.github.io/PATEN
        * @protected
        */
       static _parseBindings(text, templateInfo) {
-        const parts = [];
-        let bindingData = {};
-        let escaped = false;
-        /** @type {string} */
-        let quote;
-        /** @type {number} */
-        let state = STATE.INITIAL;
-        let i,l;
-
-        for (i=0,l=text.length; i<l; i++) {
-          const char = text.charAt(i);
-          switch (state) {
-            case STATE.INITIAL: {
-              if ((char === '{' || char === '[')) {
-                bindingData = {
-                  mode: char,
-                  dependencies: [],
-                  startChar: bindingData.startChar
-                };
-                state = STATE.FIRSTOPENINGBINDING;
-              }
-              break;
-            }
-            case STATE.FIRSTOPENINGBINDING: {
-              if (char === bindingData.mode) {
-                pushLiteral(text, i - 1, parts, bindingData.startChar);
-                bindingData.startChar = i + 1;
-                state = STATE.FIRSTCHARACTERBINDING;
-              } else {
-                bindingData = {};
-                state = STATE.INITIAL;
-              }
-              break;
-            }
-            case STATE.FIRSTCHARACTERBINDING: {
-              if (char !== ' ' && char !== '\t' && char !== '\n') {
-                if (char === '!') {
-                  bindingData.negate = true;
-                  bindingData.startChar = i + 1;
-                }
-                state = STATE.BINDING;
-              }
-              break;
-            }
-            case STATE.BINDING: {
-              switch (char) {
-                case BINDINGS[bindingData.mode]: {
-                  state = STATE.FIRSTCLOSINGBINDING;
-                  break;
-                }
-                case '\'':
-                case '"': {
-                  quote = char;
-                  state = STATE.STRING;
-                  break;
-                }
-                case '(': {
-                  bindingData.signature = {
-                    methodName: text.substring(bindingData.startChar, i).trim(),
-                    args: [],
-                    static: true
-                  };
-                  bindingData.startChar = i + 1;
-                  state = STATE.METHOD;
-                  break;
-                }
-                case ':': {
-                  state = STATE.FIRSTCOLON;
-                }
-              }
-              break;
-            }
-            case STATE.FIRSTCOLON: {
-              if (char === ':') {
-                bindingData.customEvent = true;
-                bindingData.startCharAfterColon = i + 1;
-                state = STATE.COLONNOTIFYEVENT;
-              } else {
-                state = STATE.BINDING;
-              }
-              break;
-            }
-            case STATE.COLONNOTIFYEVENT: {
-              if (char === BINDINGS[bindingData.mode]) {
-                state = STATE.COLONNOTIFYEVENTFIRSTCLOSINGBINDING;
-              }
-              break;
-            }
-            case STATE.COLONNOTIFYEVENTFIRSTCLOSINGBINDING: {
-              if (char === BINDINGS[bindingData.mode]) {
-                bindingData.event = text.substring(bindingData.startCharAfterColon, i - 1).trim();
-                const prop = text.substring(bindingData.startChar, bindingData.startCharAfterColon - 2).trim();
-                storeVariableBinding(parts, bindingData, prop, i);
-                state = STATE.INITIAL;
-              } else {
-                state = STATE.BINDING;
-              }
-              break;
-            }
-            case STATE.FIRSTCLOSINGBINDING: {
-              if (char === BINDINGS[bindingData.mode]) {
-                const prop = text.substring(bindingData.startChar, i - 1).trim();
-                storeVariableBinding(parts, bindingData, prop, i);
-                state = STATE.INITIAL;
-              } else {
-                state = STATE.BINDING;
-              }
-              break;
-            }
-            case STATE.STRING: {
-              if (char === '\\') {
-                escaped = true;
-              } else if (char === quote && !escaped) {
-                state = STATE.BINDING;
-              } else {
-                escaped = false;
-              }
-              break;
-            }
-            case STATE.METHOD: {
-              switch (char) {
-                case ')': {
-                  storeMethodVariable(bindingData, text, i);
-                  storeMethod(bindingData, templateInfo);
-                  bindingData.startChar = i + 1;
-                  state = STATE.METHODCLOSED;
-                  break;
-                }
-                case ',': {
-                  storeMethodVariable(bindingData, text, i);
-                  bindingData.startChar = i + 1;
-                  break;
-                }
-                case '\'':
-                case '"': {
-                  quote = char;
-                  state = STATE.STRINGARG;
-                  break;
-                }
-                default: {
-                  if (char >= '0' && char <= '9' || char === '-') {
-                    state = STATE.NUMBERARG;
-                  } else if (char != ' ' && char != '\n') {
-                    state = STATE.VARIABLEARG;
-                  }
-                }
-              }
-              break;
-            }
-            case STATE.STRINGARG: {
-              if (char === '\\') {
-                escaped = true;
-              } else if (char === quote && !escaped) {
-                const value = text.substring(bindingData.startChar, i)
-                    .replace(/^\s+/, '')
-                    .substring(1)
-                    // replace comma entity with comma
-                    .replace(/&comma;/g, ',')
-                    // repair extra escape sequences; note only commas strictly need
-                    // escaping, but we allow any other char to be escaped since its
-                    // likely users will do this
-                    .replace(/\\(.)/g, '\$1');
-                bindingData.signature.args.push({
-                  value,
-                  name: value,
-                  literal: true
-                });
-                bindingData.startChar = i + 1;
-                state = STATE.METHOD;
-              } else {
-                escaped = false;
-              }
-              break;
-            }
-            case STATE.NUMBERARG: {
-              switch (char) {
-                case ',': {
-                  storeMethodNumber(bindingData, text, i);
-                  bindingData.startChar = i + 1;
-                  state = STATE.METHOD;
-                  break;
-                }
-                case ')': {
-                  storeMethodNumber(bindingData, text, i);
-                  storeMethod(bindingData, templateInfo);
-                  state = STATE.METHODCLOSED;
-                  break;
-                }
-                default: {
-                  if (char < '0' || char > '9') {
-                    state = STATE.VARIABLEARG;
-                  }
-                }
-              }
-              break;
-            }
-            case STATE.VARIABLEARG: {
-              switch (char) {
-                case ',': {
-                  storeMethodVariable(bindingData, text, i);
-                  bindingData.startChar = i + 1;
-                  state = STATE.METHOD;
-                  break;
-                }
-                case ')': {
-                  storeMethodVariable(bindingData, text, i);
-                  storeMethod(bindingData, templateInfo);
-                  state = STATE.METHODCLOSED;
-                  break;
-                }
-              }
-              break;
-            }
-            case STATE.METHODCLOSED: {
-              if (char === BINDINGS[bindingData.mode]) {
-                state = STATE.METHODCLOSEDBINDING;
-              } else if (char !== ' ' && char !== '\t' && char !== '\n') {
-                console.warn(`Expected two closing "${BINDINGS[bindingData.mode]}" for binding "${text}"`);
-              }
-              break;
-            }
-            case STATE.METHODCLOSEDBINDING: {
-              if (char === BINDINGS[bindingData.mode]) {
-                bindingData.startChar = i + 1;
-                parts.push(bindingData);
-                state = STATE.INITIAL;
-              } else if (char !== ' ' && char !== '\t' && char !== '\n') {
-                console.warn(`Expected one closing "${BINDINGS[bindingData.mode]}" for binding "${text}"`);
-              }
-              break;
+        let startIndex = text.indexOf('[[');
+        let char = ']'
+        if (startIndex === -1) {
+          startIndex = text.indexOf('{{');
+          char = '}'
+        }
+        if (startIndex !== -1) {
+          let endIndex = text.indexOf(char + char);
+          if (endIndex !== -1) {
+            try {
+              let ast = parse(text.slice(startIndex + 2, endIndex), astFactory);
+              return [{ast, text, dependencies: ast.getIds([])}];
+            } catch (e) {
+              // debugger;
             }
           }
         }
-
-        if (parts.length) {
-          pushLiteral(text, i, parts, parts[parts.length - 1].startChar);
-          return parts;
-        }
-
         return null;
+      }
+
+      static _evaluateBinding(scope, part, path, props, oldProps, hasPaths) {
+        if (part.ast) {
+          try {
+            return part.ast.evaluate(scope);
+          } catch (e) {
+            return null;
+          }
+        } else {
+          return super._evaluateBinding(scope, part, path, props, oldProps, hasPaths);
+        }
       }
     };
   });
